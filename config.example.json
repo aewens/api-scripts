@@ -1,0 +1,8 @@
+{
+    "do": {
+        "api_token": ""
+    },
+    "gh": {
+        "oauth_token": ""
+    }
+}

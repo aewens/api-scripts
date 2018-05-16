@@ -1,0 +1,195 @@
+#!/usr/bin/env python3
+
+import sys
+import json
+import requests
+
+def decode(data):
+    try:
+        return json.loads(data)
+    except ValueError as e:
+        return None
+        
+def encode(data):
+    try:
+        return json.dumps(data, sort_keys=True, 
+                                indent=4, 
+                                separators=(",", ":"))
+    except ValueError as e:
+        return None
+
+config_name = "config.json"
+config_file = open(config_name, "r")
+config = decode(config_file.read())
+config_file.close()
+
+if config is None:
+    print("Error: %s could not be parsed" % config_name)
+    sys.exit(1)
+
+api_token = config.get("do", {}).get("api_token", None)
+api_url_base = "https://api.digitalocean.com/v2"
+
+if api_token is None:
+    print("Error: No API token")
+    sys.exit(1)
+
+headers = {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer %s" % api_token
+}
+
+def get_droplets():
+    api_url = "%s/droplets" % api_url_base
+    res = requests.get(api_url, headers=headers)
+    
+    if res.status_code != 200:
+        print("Error: Returned with %s" % res.status_code)
+        sys.exit(1)
+        
+    response = decode(res.content.decode("utf-8"))
+    droplets = response.get("droplets", None)
+    
+    if droplets is None:
+        print("Error: 'droplets' is missing from response")
+        sys.exit(1)
+        
+    result = dict()
+    for droplet in droplets:
+        name = droplet.get("name", None)
+        if name is not None:
+            result[name] = {
+                "id": droplet.get("id", None),
+                "status": droplet.get("status", None)
+            }
+            
+    return result
+    
+def droplet_check_actions(droplet_name, action_id, skip=False):
+    if skip:
+        droplets = get_droplets()
+        names = list(droplets.keys())
+        if droplet_name not in names:
+            print("Error: Droplet '%s' not on this account" % droplet_name)
+            sys.exit(1)
+        
+    droplet_id = droplets[droplet_name].get("id")
+    
+    api_tuple = (api_url_base, droplet_id, action_id)
+    api_url = "%s/droplets/%s/actions/%s" % api_tuple
+    
+    res = requests.get(api_url, headers=headers)
+    result = decode(res.content.decode("utf-8"))
+    if str(res.status_code)[0] != "2":
+        print(res.url, encode(result))
+        print("Error: Returned with %s" % res.status_code)
+        sys.exit(1)
+        
+    return result.get("action").get("status")
+    
+def droplet_status(droplet_name):
+    droplets = get_droplets()
+    names = list(droplets.keys())
+    if droplet_name not in names:
+        print("Error: Droplet '%s' not on this account" % droplet_name)
+        sys.exit(1)
+        
+    return droplets[droplet_name].get("status")
+    
+def droplet_action(droplet_name, action):
+    actions = [
+        "power_on",
+        "power_off",
+        "shutdown",
+        "reboot",
+        "power_cycle"
+    ]
+    if action not in actions:
+        print("Error: '%s' is an invalid action" % action)
+        sys.exit(1)
+        
+    droplets = get_droplets()
+    names = list(droplets.keys())
+    if droplet_name not in names:
+        print("Error: Droplet '%s' not on this account" % droplet_name)
+        sys.exit(1)
+        
+    droplet_id = droplets[droplet_name].get("id")
+    
+    api_url = "%s/droplets/%s/actions" % (api_url_base, droplet_id)
+    params = {"type": action}
+    
+    res = requests.post(api_url, headers=headers, params=params)
+    result = decode(res.content.decode("utf-8"))
+    if str(res.status_code)[0] != "2":
+        print(encode(result))
+        print("Error: Returned with %s" % res.status_code)
+        sys.exit(1)
+        
+    check_tuple = droplet_name, result.get("action").get("id"), True
+    return droplet_check_actions(*check_tuple)
+    
+def droplet_power_on(droplet_name):
+    return droplet_action(droplet_name, "power_on")
+    
+def droplet_power_off(droplet_name):
+    return droplet_action(droplet_name, "power_off")
+    
+def droplet_shutdown(droplet_name):
+    return droplet_action(droplet_name, "shutdown")
+    
+def droplet_reboot(droplet_name):
+    return droplet_action(droplet_name, "reboot")
+    
+def droplet_power_cycle(droplet_name):
+    return droplet_action(droplet_name, "power_cycle")
+    
+def main(args):
+    len_args = len(args)
+    if len_args == 0:
+        print("Error: Expecting argument")
+        sys.exit(1)
+    elif len_args > 3:
+        print("Error: Too many arguments")
+        sys.exit(1)
+        
+    options = {
+        "list": get_droplets,
+        "up": droplet_power_on,
+        "off": droplet_power_off,
+        "down": droplet_shutdown,
+        "reboot": droplet_reboot,
+        "cycle": droplet_power_cycle,
+        "check": droplet_check_actions,
+        "status": droplet_status
+    }
+    
+    if len_args == 2:
+        command = args[1]
+        param = args[0]
+        action = options.get(command, None)
+        if action is None:
+            print("Error: Invalid argument '%s'" % command)
+            sys.exit(1)
+            
+        print(encode(action(param)))
+    elif len_args == 3:
+        command = args[1]
+        params = [args[0], args[2]]
+        action = options.get(command)
+        if action is None:
+            print("Error: Invalid argument '%s'" % command)
+            sys.exit(1)
+            
+        print(encode(action(*params)))
+    else:
+        command = args[0]
+        action = options.get(command)
+        if action is None:
+            print("Error: Invalid argument '%s'" % command)
+            sys.exit(1)
+            
+        print(encode(action()))
+    
+if __name__ == "__main__":
+    main(sys.argv[1:])
