@@ -144,6 +144,12 @@ def droplet_reboot(droplet_name):
 def droplet_power_cycle(droplet_name):
     return droplet_action(droplet_name, "power_cycle")
     
+def droplet_full_off(droplet_name):
+    shutdown = droplet_shutdown(droplet_name)
+    if (shutdown == "completed"):
+        return droplet_power_off(droplet_name)
+    return shutdown
+    
 def main(args):
     len_args = len(args)
     if len_args == 0:
@@ -161,7 +167,8 @@ def main(args):
         "reboot": droplet_reboot,
         "cycle": droplet_power_cycle,
         "check": droplet_check_actions,
-        "status": droplet_status
+        "status": droplet_status,
+        "off!": droplet_full_off
     }
     
     if len_args == 2:
